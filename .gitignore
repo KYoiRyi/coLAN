@@ -68,10 +68,20 @@ ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
 
+# Claude Code
+.claude/
+
 # coLAN specific files to ignore
 data/
 uploads/
 *.pkl
+
+# Build artifacts
+build_windows/
+coLAN_Windows_Release/
+*.exe
+*.dll
+*.pyd
 
 # Logs
 *.log
