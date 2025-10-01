@@ -174,7 +174,9 @@ def hash_password(password):
 @app.route('/')
 def index():
     local_ip = get_local_ip()
-    return render_template('index.html', rooms=rooms, server_ip=local_ip, server_port=5000)
+    # Get port from the running server
+    port = getattr(app, 'server_port', 5000)
+    return render_template('index.html', rooms=rooms, server_ip=local_ip, server_port=port)
 
 @app.route('/api/rooms')
 def get_rooms():
@@ -366,10 +368,18 @@ def handle_file_share(data):
     emit('message', message_data, room=room_id)
 
 if __name__ == '__main__':
+    from port_manager import PortManager
+
+    port_manager = PortManager()
+    port = port_manager.find_available_port()
+
+    # Store port in app for route access
+    app.server_port = port
+
     local_ip = get_local_ip()
     print(f"coLAN Server starting...")
-    print(f"Local access: http://127.0.0.1:5000")
-    print(f"LAN access: http://{local_ip}:5000")
+    print(f"Local access: http://127.0.0.1:{port}")
+    print(f"LAN access: http://{local_ip}:{port}")
     print("Press Ctrl+C to stop the server")
 
-    socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)

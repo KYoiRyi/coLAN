@@ -135,11 +135,20 @@ def main():
 
         # Import and run the app
         from app import socketio, app, get_local_ip
+        from port_manager import PortManager
+
+        # Find available port
+        port_manager = PortManager()
+        port = port_manager.find_available_port()
+
+        # Store port in app for route access
+        app.server_port = port
+
         local_ip = get_local_ip()
 
         print(f"🌐 coLAN Server is running!")
-        print(f"📱 Local access: http://127.0.0.1:5000")
-        print(f"🌐 LAN access: http://{local_ip}:5000")
+        print(f"📱 Local access: http://127.0.0.1:{port}")
+        print(f"🌐 LAN access: http://{local_ip}:{port}")
         print(f"📁 Files saved in: {os.path.abspath('uploads')}")
         print(f"💾 Data saved in: {os.path.abspath('data')}")
         print("-" * 50)
@@ -147,7 +156,7 @@ def main():
         print("Press Ctrl+C to stop the server")
         print("=" * 50)
 
-        socketio.run(app, host='0.0.0.0', port=5000, debug=False, allow_unsafe_werkzeug=True)
+        socketio.run(app, host='0.0.0.0', port=port, debug=False, allow_unsafe_werkzeug=True)
 
     except ImportError as e:
         print(f"Error importing app: {e}")
