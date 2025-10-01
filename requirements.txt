@@ -1,0 +1,3 @@
+flask
+flask-socketio
+Werkzeug==2.3.7
