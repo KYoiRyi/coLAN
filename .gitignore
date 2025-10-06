@@ -42,6 +42,9 @@ $RECYCLE.BIN/
 data/
 uploads/
 *.pkl
+*.db
+*.sqlite
+*.sqlite3
 
 # Logs
 *.log
