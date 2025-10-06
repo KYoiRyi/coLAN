@@ -77,16 +77,25 @@ export default function ColanApp() {
   const [sessionId, setSessionId] = useState<string>('')
   const [showOnlineUsers, setShowOnlineUsers] = useState(false)
 
+  // Authentication states
+  const [loginMode, setLoginMode] = useState<'temporary' | 'permanent'>('temporary')
+  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('')
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [accessToken, setAccessToken] = useState<string>('')
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    // Check if username exists in localStorage
+    // Check for existing authentication
     const savedUsername = localStorage.getItem('colan_username')
+    const savedAccessToken = localStorage.getItem('colan_access_token')
     const savedSessionId = localStorage.getItem('colan_session_id')
 
-    if (savedUsername) {
+    if (savedUsername && savedAccessToken) {
       setUsername(savedUsername)
+      setAccessToken(savedAccessToken)
       if (savedSessionId) {
         setSessionId(savedSessionId)
       }
@@ -211,7 +220,7 @@ export default function ColanApp() {
     }
   }
 
-  const handleUsernameSubmit = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!username.trim()) {
@@ -224,36 +233,119 @@ export default function ColanApp() {
       return
     }
 
+    if (loginMode === 'permanent' && !password.trim()) {
+      setError('Password is required for permanent users')
+      return
+    }
+
     setLoading(true)
     setError('')
 
     try {
-      // Check username uniqueness
-      const response = await fetch('/api/validate_username', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username: username.trim() }),
-      })
+      let response
+      let data
 
-      const validation = await response.json()
+      if (loginMode === 'temporary') {
+        // Temporary user login
+        const deviceId = localStorage.getItem('colan_device_id') || generateDeviceId()
+        localStorage.setItem('colan_device_id', deviceId)
 
-      if (!validation.available) {
-        setError(validation.message || 'Username is not available')
-        return
+        response = await fetch('/api/auth/temp-login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            username: username.trim(),
+            deviceId: deviceId
+          }),
+        })
+
+        data = await response.json()
+
+        if (!response.ok) {
+          if (data.needsDeviceVerification) {
+            setError('Username already exists on another device. Temporary accounts are device-specific.')
+          } else {
+            setError(data.error || 'Failed to create temporary account')
+          }
+          return
+        }
+
+        // Save temporary user data
+        localStorage.setItem('colan_username', data.user.username)
+        localStorage.setItem('colan_access_token', data.user.accessToken)
+        localStorage.setItem('colan_is_temporary', 'true')
+        setAccessToken(data.user.accessToken)
+        setCurrentUser(data.user)
+      } else {
+        // Permanent user login/create
+        response = await fetch('/api/auth/permanent-login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            username: username.trim(),
+            password: password.trim(),
+            email: email.trim() || undefined
+          }),
+        })
+
+        data = await response.json()
+
+        if (!response.ok) {
+          setError(data.error || 'Failed to login/create permanent account')
+          return
+        }
+
+        // Save permanent user data
+        localStorage.setItem('colan_username', data.user.username)
+        localStorage.setItem('colan_access_token', data.user.accessToken)
+        localStorage.setItem('colan_is_temporary', 'false')
+        setAccessToken(data.user.accessToken)
+        setCurrentUser(data.user)
       }
-
-      // Save to localStorage
-      localStorage.setItem('colan_username', username.trim())
 
       setCurrentView('dashboard')
       fetchRooms()
     } catch (error) {
-      setError('Failed to validate username')
+      setError('Login failed')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleLogout = async () => {
+    if (!accessToken) return
+
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ accessToken }),
+      })
+    } catch (error) {
+      console.error('Logout failed:', error)
+    }
+
+    // Clear all auth data
+    localStorage.removeItem('colan_username')
+    localStorage.removeItem('colan_access_token')
+    localStorage.removeItem('colan_session_id')
+    localStorage.removeItem('colan_is_temporary')
+
+    setUsername('')
+    setAccessToken('')
+    setCurrentUser(null)
+    setSessionId('')
+    setCurrentView('welcome')
+  }
+
+  const generateDeviceId = () => {
+    return 'device_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36)
   }
 
   const handleCreateRoom = async (e: React.FormEvent) => {
@@ -466,10 +558,15 @@ export default function ColanApp() {
               <MessageSquare className="h-12 w-12 text-primary" />
             </div>
             <CardTitle className="text-2xl">Welcome to coLAN</CardTitle>
-            <CardDescription>Enter your username to start chatting</CardDescription>
+            <CardDescription>
+              {loginMode === 'temporary'
+                ? 'Enter your name to start chatting (temporary account)'
+                : 'Login or create permanent account'
+              }
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleUsernameSubmit} className="space-y-4">
+            <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <Label htmlFor="username" className="text-sm font-medium">Username</Label>
                 <Input
@@ -482,17 +579,82 @@ export default function ColanApp() {
                   disabled={loading}
                 />
               </div>
+
+              {loginMode === 'permanent' && (
+                <>
+                  <div>
+                    <Label htmlFor="password" className="text-sm font-medium">Password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Enter your password"
+                      className="mt-1"
+                      disabled={loading}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="email" className="text-sm font-medium">Email (Optional)</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="Enter your email"
+                      className="mt-1"
+                      disabled={loading}
+                    />
+                  </div>
+                </>
+              )}
+
               {error && (
                 <p className="text-sm text-red-600">{error}</p>
               )}
+
               <Button
                 type="submit"
                 className="w-full"
-                disabled={loading || !username.trim()}
+                disabled={loading || !username.trim() || (loginMode === 'permanent' && !password.trim())}
               >
-                {loading ? 'Starting...' : 'Enter Chat'}
+                {loading
+                  ? 'Logging in...'
+                  : loginMode === 'temporary'
+                    ? 'Start Chatting'
+                    : 'Login / Create Account'
+                }
               </Button>
             </form>
+
+            <div className="mt-6 text-center">
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">Or</span>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setLoginMode(loginMode === 'temporary' ? 'permanent' : 'temporary')
+                  setError('')
+                  setPassword('')
+                  setEmail('')
+                }}
+                className="mt-3 text-xs"
+              >
+                {loginMode === 'temporary'
+                  ? '🔑 Switch to Permanent Account'
+                  : '⚡ Switch to Temporary Account'
+                }
+              </Button>
+            </div>
+
             <div className="mt-4 text-center">
               <ThemeSwitcher />
             </div>
@@ -517,6 +679,15 @@ export default function ColanApp() {
                 </div>
                 <div className="flex items-center gap-2">
                   <ThemeSwitcher />
+                  <Button
+                    onClick={handleLogout}
+                    size="sm"
+                    variant="outline"
+                    className="gap-2"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Logout
+                  </Button>
                   <Button
                     onClick={() => setShowCreateModal(true)}
                     size="sm"
