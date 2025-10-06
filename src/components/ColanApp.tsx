@@ -23,6 +23,9 @@ import {
   X
 } from 'lucide-react'
 import FilePreview from '@/components/FilePreview'
+import UserSettings from '@/components/UserSettings'
+import { useKeyboardShortcuts, KeyboardShortcutsHelp, colanShortcuts, type Shortcut } from '@/components/KeyboardShortcuts'
+import { TooltipWithShortcut, SimpleTooltip } from '@/components/ui/Tooltip'
 
 interface Room {
   id: string
@@ -84,8 +87,118 @@ export default function ColanApp() {
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [accessToken, setAccessToken] = useState<string>('')
 
+  // UI states
+  const [showSettings, setShowSettings] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  const [isTyping, setIsTyping] = useState(false)
+  const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+
+  // Keyboard shortcuts configuration based on current view
+  const shortcuts: Shortcut[] = [
+    // Global shortcuts
+    {
+      key: '?',
+      description: '显示键盘快捷键帮助',
+      action: () => setShowKeyboardShortcuts(true),
+      global: true
+    },
+    {
+      key: 'Escape',
+      description: '关闭模态框',
+      action: () => {
+        setShowKeyboardShortcuts(false)
+        setShowSettings(false)
+        setShowUserMenu(false)
+        setShowCreateModal(false)
+        setShowPasswordModal(false)
+        setShowFileUpload(false)
+      },
+      global: true
+    }
+  ]
+
+  // Add view-specific shortcuts
+  if (currentView === 'welcome') {
+    shortcuts.push(
+      {
+        key: 'Enter',
+        description: '提交登录表单',
+        action: () => {
+          const form = document.querySelector('form') as HTMLFormElement
+          form?.requestSubmit()
+        }
+      }
+    )
+  } else if (currentView === 'dashboard') {
+    shortcuts.push(
+      {
+        key: 'n',
+        ctrlKey: true,
+        description: '创建新房间',
+        action: () => setShowCreateModal(true)
+      },
+      {
+        key: 'r',
+        description: '刷新房间列表',
+        action: () => fetchRooms()
+      }
+    )
+  } else if (currentView === 'chat') {
+    shortcuts.push(
+      {
+        key: 'Enter',
+        description: '发送消息',
+        action: () => {
+          if (messageInput.trim()) {
+            sendMessage()
+          }
+        }
+      },
+      {
+        key: 'Enter',
+        shiftKey: true,
+        description: '换行输入',
+        action: () => {
+          // Allow default behavior for Shift+Enter
+        }
+      },
+      {
+        key: 'u',
+        description: '显示在线用户',
+        action: () => setShowOnlineUsers(!showOnlineUsers)
+      },
+      {
+        key: 'f',
+        description: '显示文件列表',
+        action: () => setShowFileUpload(!showFileUpload)
+      },
+      {
+        key: 's',
+        ctrlKey: true,
+        description: '打开设置',
+        action: () => setShowSettings(true)
+      },
+      {
+        key: 'l',
+        description: '离开房间',
+        action: () => leaveRoom()
+      },
+      {
+        key: '/',
+        description: '聚焦到输入框',
+        action: () => {
+          const input = document.querySelector('input[type="text"]') as HTMLInputElement
+          input?.focus()
+        }
+      }
+    )
+  }
+
+  useKeyboardShortcuts(shortcuts)
 
   useEffect(() => {
     // Check for existing authentication
@@ -128,6 +241,20 @@ export default function ColanApp() {
       }
     }
   }, [currentView, currentRoom, sessionId])
+
+  // Close user menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -669,29 +796,75 @@ export default function ColanApp() {
       <div className="min-h-screen bg-background/80 backdrop-blur-xl">
         {/* Fixed Header */}
         <div className="fixed top-0 left-0 right-0 z-10 p-4">
-          <Card className="glassmorphism-solid border-white/20 shadow-2xl">
+          <Card className="glassmorphism-strong border-white/30 shadow-2xl">
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <MessageSquare className="h-6 w-6 text-primary" />
-                  <h1 className="text-xl font-bold">coLAN</h1>
-                  <span className="text-sm text-muted-foreground">Welcome, {username}</span>
+                  <div className="relative">
+                    <MessageSquare className="h-7 w-7 text-gradient-purple" />
+                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-background pulse-glow" />
+                  </div>
+                  <div>
+                    <h1 className="text-2xl font-bold text-gradient">coLAN</h1>
+                    <p className="text-xs text-muted-foreground">Local Area Network Chat</p>
+                  </div>
+                  <div className="h-8 w-px bg-gradient-to-b from-transparent via-border to-transparent" />
+                  <span className="text-sm text-muted-foreground">Welcome, <span className="font-medium text-foreground">{username}</span></span>
                 </div>
+
                 <div className="flex items-center gap-2">
                   <ThemeSwitcher />
-                  <Button
-                    onClick={handleLogout}
-                    size="sm"
-                    variant="outline"
-                    className="gap-2"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </Button>
+
+                  {/* User Menu */}
+                  <div className="relative" ref={userMenuRef}>
+                    <Button
+                      onClick={() => setShowUserMenu(!showUserMenu)}
+                      size="sm"
+                      variant="ghost"
+                      className="gap-2 hover:bg-white/10 relative group"
+                    >
+                      <div className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-xs font-bold text-white group-hover:scale-110 transition-transform">
+                        {username.charAt(0).toUpperCase()}
+                      </div>
+                    </Button>
+
+                    <AnimatePresence>
+                      {showUserMenu && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                          className="absolute right-0 mt-2 w-56 glassmorphism-strong border-white/30 rounded-lg shadow-2xl overflow-hidden"
+                        >
+                          <div className="p-2">
+                            <button
+                              onClick={() => {
+                                setShowSettings(true)
+                                setShowUserMenu(false)
+                              }}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-white/10 rounded-lg transition-colors"
+                            >
+                              <Settings className="h-4 w-4" />
+                              <span className="text-sm">用户设置</span>
+                            </button>
+                            <div className="h-px bg-white/20 my-1" />
+                            <button
+                              onClick={handleLogout}
+                              className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-red-500/10 text-red-400 rounded-lg transition-colors"
+                            >
+                              <LogOut className="h-4 w-4" />
+                              <span className="text-sm">退出登录</span>
+                            </button>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+
                   <Button
                     onClick={() => setShowCreateModal(true)}
                     size="sm"
-                    className="gap-2"
+                    className="gap-2 bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 border-0 shadow-lg hover-lift"
                   >
                     <Plus className="h-4 w-4" />
                     Create Room
@@ -704,17 +877,20 @@ export default function ColanApp() {
 
         {/* Main Content */}
         <div className="pt-24 pb-4 px-4">
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             <AnimatePresence>
-              {rooms.map((room) => (
+              {rooms.map((room, index) => (
                 <motion.div
                   key={room.id}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
+                  initial={{ opacity: 0, y: 30, scale: 0.9 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -30, scale: 0.9 }}
+                  transition={{ duration: 0.3, delay: index * 0.1 }}
+                  whileHover={{ y: -5, scale: 1.02 }}
+                  className="group"
                 >
                   <Card
-                    className="glassmorphism-solid hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer"
+                    className="glassmorphism-card hover:shadow-2xl transition-all duration-500 cursor-pointer border-gradient hover-lift group-hover:border-purple-500/50"
                     onClick={(e) => handleJoinRoomClick(e, room)}
                     onTouchEnd={(e) => handleJoinRoomClick(e, room)}
                     role="button"
@@ -725,28 +901,40 @@ export default function ColanApp() {
                       }
                     }}
                   >
-                    <CardHeader>
+                    <CardHeader className="relative">
+                      <div className="absolute top-0 right-0 w-12 h-12 bg-gradient-to-br from-purple-500/20 to-blue-500/20 rounded-full blur-xl -z-10 group-hover:scale-150 transition-transform duration-500" />
                       <div className="flex items-center justify-between">
-                        <CardTitle className="text-lg">{room.name}</CardTitle>
+                        <CardTitle className="text-xl font-semibold group-hover:text-gradient transition-colors duration-300">
+                          {room.name}
+                        </CardTitle>
                         {room.has_password && (
-                          <span className="text-xs bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 px-2 py-1 rounded">
+                          <motion.span
+                            className="text-xs bg-gradient-to-r from-yellow-400/20 to-orange-400/20 text-yellow-600 dark:text-yellow-400 px-2 py-1 rounded-full border border-yellow-400/30 backdrop-blur-sm"
+                            whileHover={{ scale: 1.1 }}
+                          >
                             🔒
-                          </span>
+                          </motion.span>
                         )}
                       </div>
-                      <CardDescription className="flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        {room.user_count} users
+                      <CardDescription className="flex items-center gap-2 mt-2">
+                        <div className="flex items-center gap-1">
+                          <Users className="h-4 w-4 text-purple-500" />
+                          <span className="text-sm">{room.user_count} users</span>
+                        </div>
+                        <div className="h-4 w-px bg-border/50" />
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(room.created_at).toLocaleDateString()}
+                        </span>
                       </CardDescription>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="pt-0">
                       <Button
-                        className="w-full"
+                        className="w-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 border-0 shadow-lg group-hover:shadow-xl transition-all duration-300 hover-lift"
                         size="sm"
                         onClick={(e) => handleJoinRoomClick(e, room)}
                         onTouchEnd={(e) => handleJoinRoomClick(e, room)}
                       >
-                        Join Room
+                        加入房间
                       </Button>
                     </CardContent>
                   </Card>
@@ -755,15 +943,37 @@ export default function ColanApp() {
             </AnimatePresence>
 
             {rooms.length === 0 && (
-              <div className="col-span-full text-center py-12">
-                <MessageSquare className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <h3 className="text-lg font-medium mb-2">No rooms yet</h3>
-                <p className="text-muted-foreground mb-4">Create your first room to start chatting</p>
-                <Button onClick={() => setShowCreateModal(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create Room
-                </Button>
-              </div>
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="col-span-full text-center py-16"
+              >
+                <div className="relative inline-block">
+                  <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-blue-500/20 rounded-full blur-3xl floating-animation" />
+                  <div className="relative glassmorphism-card p-12 rounded-2xl border-gradient">
+                    <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shadow-2xl floating-animation">
+                      <MessageSquare className="h-12 w-12 text-white" />
+                    </div>
+                    <h3 className="text-2xl font-bold text-gradient mb-3">还没有房间</h3>
+                    <p className="text-muted-foreground mb-8 max-w-md mx-auto">
+                      创建你的第一个房间，开始与朋友们聊天吧！coLAN 让局域网沟通变得简单高效。
+                    </p>
+                    <TooltipWithShortcut
+                      content="创建一个新的聊天房间"
+                      shortcut="Ctrl+N"
+                    >
+                      <Button
+                        onClick={() => setShowCreateModal(true)}
+                        size="lg"
+                        className="bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 border-0 shadow-xl hover-lift"
+                      >
+                        <Plus className="h-5 w-5 mr-2" />
+                        创建房间
+                      </Button>
+                    </TooltipWithShortcut>
+                  </div>
+                </div>
+              </motion.div>
             )}
           </div>
         </div>
@@ -1077,23 +1287,33 @@ export default function ColanApp() {
                   onChange={handleFileSelect}
                   className="hidden"
                 />
-                <Button
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={!connected || uploading}
-                  size="icon"
-                  className="bg-white/10 border-white/20 hover:bg-white/20"
+                <TooltipWithShortcut
+                  content="上传文件"
+                  shortcut="F"
                 >
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-                <Button
-                  onClick={sendMessage}
-                  disabled={!connected || !messageInput.trim()}
-                  size="icon"
-                  className="bg-primary/80 hover:bg-primary"
+                  <Button
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={!connected || uploading}
+                    size="icon"
+                    className="bg-white/10 border-white/20 hover:bg-white/20"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </Button>
+                </TooltipWithShortcut>
+                <TooltipWithShortcut
+                  content="发送消息"
+                  shortcut="Enter"
                 >
-                  <Send className="h-4 w-4" />
-                </Button>
+                  <Button
+                    onClick={sendMessage}
+                    disabled={!connected || !messageInput.trim()}
+                    size="icon"
+                    className="bg-primary/80 hover:bg-primary"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </TooltipWithShortcut>
               </div>
               {uploading && (
                 <p className="text-xs text-muted-foreground mt-2 text-center">
@@ -1255,5 +1475,23 @@ export default function ColanApp() {
     )
   }
 
-  return null
+  return (
+    <>
+      {/* User Settings Modal */}
+      <UserSettings
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        username={username}
+        isTemporary={!localStorage.getItem('colan_is_temporary')}
+        onLogout={handleLogout}
+      />
+
+      {/* Keyboard Shortcuts Help Modal */}
+      <KeyboardShortcutsHelp
+        shortcuts={shortcuts}
+        isOpen={showKeyboardShortcuts}
+        onClose={() => setShowKeyboardShortcuts(false)}
+      />
+    </>
+  )
 }
